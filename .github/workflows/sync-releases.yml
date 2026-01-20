@@ -23,15 +23,14 @@ jobs:
         id: upstream
         run: |
           # Get latest version from CocoaPods trunk API
-          UPSTREAM_VERSION=$(curl -s "https://trunk.cocoapods.org/api/v1/pods/AppLovinSDK" | jq -r '.versions | sort_by(.created_at) | last | .name')
+          UPSTREAM_VERSION=$(curl -sL "https://trunk.cocoapods.org/api/v1/pods/AppLovinSDK" | jq -r '.versions | sort_by(.created_at) | last | .name')
           echo "Upstream version: $UPSTREAM_VERSION"
 
-          # Fetch podspec from CDN (shard is first 3 chars of md5 hash, separated by slashes)
-          SHARD=$(echo -n "AppLovinSDK" | md5 | cut -c1-3 | sed 's/\(.\)/\1\//g')
-          PODSPEC_URL="https://cdn.cocoapods.org/Specs/${SHARD}AppLovinSDK/${UPSTREAM_VERSION}/AppLovinSDK.podspec.json"
+          # Fetch podspec from CDN (shard is first 3 chars of md5 hash: 9cc for AppLovinSDK)
+          PODSPEC_URL="https://cdn.cocoapods.org/Specs/9/c/c/AppLovinSDK/${UPSTREAM_VERSION}/AppLovinSDK.podspec.json"
           echo "Podspec URL: $PODSPEC_URL"
 
-          UPSTREAM_ASSET_URL=$(curl -s "$PODSPEC_URL" | jq -r '.source.http')
+          UPSTREAM_ASSET_URL=$(curl -sL "$PODSPEC_URL" | jq -r '.source.http')
 
           echo "version=$UPSTREAM_VERSION" >> $GITHUB_OUTPUT
           echo "asset_url=$UPSTREAM_ASSET_URL" >> $GITHUB_OUTPUT
