@@ -1,0 +1,14 @@
+# Xcode
+.build/
+*.xcodeproj
+xcuserdata/
+DerivedData/
+
+# Swift Package Manager
+.swiftpm/
+Package.resolved
+
+# Temporary files from workflow
+*.zip
+*.xcframework/
+upstream_extracted/

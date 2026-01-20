@@ -1,0 +1,172 @@
+name: Sync AppLovin SDK Releases
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 6 * * *'  # Daily at 6 AM UTC
+
+jobs:
+  sync:
+    name: Sync Latest Release
+    runs-on: macOS-latest
+    permissions:
+      contents: write
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Get latest upstream release
+        id: upstream
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          UPSTREAM_RELEASE=$(curl -s -H "Authorization: Bearer $GITHUB_TOKEN" https://api.github.com/repos/Unity-Technologies/unity-ads-ios/releases/latest)
+          UPSTREAM_VERSION=$(echo "$UPSTREAM_RELEASE" | jq -r '.tag_name')
+          UPSTREAM_ASSET_URL=$(echo "$UPSTREAM_RELEASE" | jq -r '.assets[] | select(.name | startswith("UnityAds")) | .browser_download_url')
+
+          echo "version=$UPSTREAM_VERSION" >> $GITHUB_OUTPUT
+          echo "asset_url=$UPSTREAM_ASSET_URL" >> $GITHUB_OUTPUT
+          echo "Upstream version: $UPSTREAM_VERSION"
+          echo "Asset URL: $UPSTREAM_ASSET_URL"
+
+      - name: Get latest local release
+        id: local
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          LOCAL_VERSION=$(gh release view --json tagName -q '.tagName' 2>/dev/null || echo "none")
+
+          echo "version=$LOCAL_VERSION" >> $GITHUB_OUTPUT
+          echo "Local version: $LOCAL_VERSION"
+
+      - name: Check if update needed
+        id: check
+        run: |
+          if [ "${{ steps.upstream.outputs.version }}" != "${{ steps.local.outputs.version }}" ]; then
+            echo "needs_update=true" >> $GITHUB_OUTPUT
+            echo "Update needed: ${{ steps.local.outputs.version }} -> ${{ steps.upstream.outputs.version }}"
+          else
+            echo "needs_update=false" >> $GITHUB_OUTPUT
+            echo "Already up to date: ${{ steps.upstream.outputs.version }}"
+          fi
+
+      - name: Download and extract upstream release
+        if: steps.check.outputs.needs_update == 'true'
+        run: |
+          echo "Downloading from: ${{ steps.upstream.outputs.asset_url }}"
+          curl -L -o upstream.zip "${{ steps.upstream.outputs.asset_url }}"
+          unzip upstream.zip -d upstream_extracted
+
+          # Find the xcframework
+          XCFRAMEWORK_PATH=$(find upstream_extracted -name "*.xcframework" -type d | head -1)
+          echo "Found xcframework at: $XCFRAMEWORK_PATH"
+
+          # Copy xcframework to working directory
+          cp -R "$XCFRAMEWORK_PATH" ./AppLovinSDK.xcframework
+
+          # Create zip for release
+          zip -r AppLovinSDK.xcframework.zip AppLovinSDK.xcframework
+
+          # Calculate checksum
+          CHECKSUM=$(xcrun swift package compute-checksum AppLovinSDK.xcframework.zip)
+          echo "CHECKSUM=$CHECKSUM" >> $GITHUB_ENV
+          echo "Checksum: $CHECKSUM"
+      
+      - name: Copy PrivacyInfo.xcprivacy
+        if: steps.check.outputs.needs_update == 'true'
+        run: |
+          mkdir -p Sources/Resources
+          PRIVACY_INFO=$(find AppLovinSDK.xcframework -name "PrivacyInfo.xcprivacy" | head -1)
+          echo "Found PrivacyInfo at: $PRIVACY_INFO"
+          cp "$PRIVACY_INFO" Sources/AppLovinSDK/Resources/PrivacyInfo.xcprivacy
+
+      - name: Update Package.swift
+        if: steps.check.outputs.needs_update == 'true'
+        run: |
+          VERSION="${{ steps.upstream.outputs.version }}"
+          CHECKSUM="${{ env.CHECKSUM }}"
+          REPO="${{ github.repository }}"
+
+          cat > Package.swift << EOF
+          // swift-tools-version:6.2
+          import PackageDescription
+
+          let package = Package(
+              name: "AppLovinSDK",
+              platforms: [
+                  .iOS(.v12),
+              ],
+              products: [
+                  .library(
+                      name: "AppLovinSDK",
+                      targets: ["AppLovinSDK"],
+                  ),
+              ],
+              targets: [
+                  .target(
+                      name: "AppLovinSDK",
+                      dependencies: ["AppLovinSDKBinary"],
+                      resources: [.copy("Resources/PrivacyInfo.xcprivacy")],
+                  ),
+                  .binaryTarget(
+                      name: "AppLovinSDKBinary",
+                      url: "https://github.com/${REPO}/releases/download/${VERSION}/AppLovinSDK.xcframework.zip",
+                      checksum: "${CHECKSUM}",
+                  ),
+              ],
+          )
+          EOF
+
+          cat Package.swift
+
+      - name: Commit Package.swift
+        if: steps.check.outputs.needs_update == 'true'
+        run: |
+          git config user.name 'Portolabot'
+          git config user.email portolabot@hiportola.com
+          git add Package.swift Sources/AppLovinSDK/Resources/PrivacyInfo.xcprivacy
+          git commit -m "Update to ${{ steps.upstream.outputs.version }}" || echo "No changes to commit"
+          git push
+
+      - name: Create tag
+        if: steps.check.outputs.needs_update == 'true'
+        run: |
+          VERSION="${{ steps.upstream.outputs.version }}"
+          git tag $VERSION
+          git push origin "refs/tags/$VERSION"
+
+      - name: Upload release asset
+        if: steps.check.outputs.needs_update == 'true'
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: AppLovinSDK.xcframework.zip
+          tag: ${{ steps.upstream.outputs.version }}
+          asset_name: AppLovinSDK.xcframework.zip
+          overwrite: false
+
+      - name: Update release notes
+        if: steps.check.outputs.needs_update == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ steps.upstream.outputs.version }}"
+
+          cat <<EOF > release_notes.txt
+          Synced from AppLovinSDK pod $VERSION
+
+          Include this framework in your Package.swift file by adding the following to your \`targets\` array:
+          \`\`\`swift
+          .binaryTarget(
+              name: "AppLovinSDK",
+              url: "https://github.com/${{ github.repository }}/releases/download/$VERSION/AppLovinSDK.xcframework.zip",
+              checksum: "${{ env.CHECKSUM }}"
+          )
+          \`\`\`
+          EOF
+
+          gh release edit $VERSION --notes-file release_notes.txt
