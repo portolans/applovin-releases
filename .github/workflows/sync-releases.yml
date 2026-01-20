@@ -19,14 +19,14 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Get latest upstream release
+      - name: Get latest upstream release from CocoaPods
         id: upstream
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          UPSTREAM_RELEASE=$(curl -s -H "Authorization: Bearer $GITHUB_TOKEN" https://api.github.com/repos/Unity-Technologies/unity-ads-ios/releases/latest)
-          UPSTREAM_VERSION=$(echo "$UPSTREAM_RELEASE" | jq -r '.tag_name')
-          UPSTREAM_ASSET_URL=$(echo "$UPSTREAM_RELEASE" | jq -r '.assets[] | select(.name | startswith("UnityAds")) | .browser_download_url')
+          # Get the latest podspec using CocoaPods CLI
+          PODSPEC=$(pod spec cat AppLovinSDK)
+
+          UPSTREAM_VERSION=$(echo "$PODSPEC" | jq -r '.version')
+          UPSTREAM_ASSET_URL=$(echo "$PODSPEC" | jq -r '.source.http')
 
           echo "version=$UPSTREAM_VERSION" >> $GITHUB_OUTPUT
           echo "asset_url=$UPSTREAM_ASSET_URL" >> $GITHUB_OUTPUT
