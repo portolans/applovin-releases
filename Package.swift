@@ -20,8 +20,8 @@ let package = Package(
         ),
         .binaryTarget(
             name: "AppLovinSDKBinary",
-            url: "https://github.com/portolans/applovin-releases/releases/download/13.6.0/AppLovinSDK.xcframework.zip",
-            checksum: "eee2075d25270c98f787370e3b96e7767fed27c57e29efeface3186b43c9eb03",
+            url: "https://github.com/portolans/applovin-releases/releases/download/13.6.1/AppLovinSDK.xcframework.zip",
+            checksum: "60cb3f0772b98bd6e1898d462861c5c790d59c698ea448974a9d32a51e556548",
         ),
     ],
 )
